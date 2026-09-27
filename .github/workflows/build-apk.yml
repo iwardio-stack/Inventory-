@@ -7,44 +7,129 @@ on:
       - main
       - master
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download repository
+
+      # --------------------------------------------------
+      # 1. Download repository
+      # --------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # --------------------------------------------------
+      # 2. Find the ZIP file
+      # --------------------------------------------------
+      - name: Find project ZIP
+        shell: bash
+        run: |
+          set -e
+
+          echo "Files in repository:"
+          find . -maxdepth 3 -type f -print
+
+          ZIP_FILE=$(find . -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo ""
+            echo "ERROR: No ZIP file was found."
+            echo ""
+            echo "Files available:"
+            find . -type f -print
+            exit 1
+          fi
+
+          echo ""
+          echo "ZIP FOUND:"
+          echo "$ZIP_FILE"
+
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+
+      # --------------------------------------------------
+      # 3. Extract ZIP
+      # --------------------------------------------------
       - name: Extract IDT project
+        shell: bash
         run: |
-          mkdir extracted
-          unzip -q IDT-Tool-Inventory-App-Full.zip -d extracted
+          set -e
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
+          echo "Extracting:"
+          echo "$ZIP_FILE"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+          rm -rf extracted
+          mkdir -p extracted
 
-      - name: Install Android SDK
+          unzip -o "$ZIP_FILE" -d extracted
+
+          echo ""
+          echo "Extraction completed."
+          echo ""
+          echo "Extracted files:"
+          find extracted -maxdepth 5 -type f -print | head -200
+
+      # --------------------------------------------------
+      # 4. Find Android project
+      # --------------------------------------------------
+      - name: Find Android project
+        shell: bash
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          set -e
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
+          echo "Searching for Android project..."
 
-      - name: Build APK
-        working-directory: extracted/IDT-Tool-Inventory-App
-        run: gradle assembleDebug
+          SETTINGS_FILE=$(find extracted \
+            -type f \
+            -name "settings.gradle" -o -name "settings.gradle.kts" \
+            | head -n 1)
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: IDT-Tool-Inventory-APK
-          path: extracted/IDT-Tool-Inventory-App/app/build/outputs/apk/debug/app-debug.apk
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo ""
+            echo "ERROR: settings.gradle was not found."
+            echo ""
+            echo "Extracted project contents:"
+            find extracted -maxdepth 8 -type f -print
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+
+          echo ""
+          echo "ANDROID PROJECT FOUND:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      # --------------------------------------------------
+      # 5. Show project structure
+      # --------------------------------------------------
+      - name: Check Android project
+        shell: bash
+        run: |
+          set -e
+
+          echo "Project directory:"
+          echo "$PROJECT_DIR"
+
+          echo ""
+          echo "Project files:"
+          find "$PROJECT_DIR" -maxdepth 4 -type f -print
+
+          echo ""
+
+          if [ ! -d "$PROJECT_DIR/app" ]; then
+            echo "ERROR: app folder was not found."
+            exit 1
+          fi
+
+          echo "app folder found."
+
+      # --------------------------------------------------
+      # 6. Install Java
+      # --------------------------------------------------
+      - name: Set up Java 
