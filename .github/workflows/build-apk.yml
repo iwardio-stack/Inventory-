@@ -13,26 +13,19 @@ jobs:
 
     steps:
 
-      # --------------------------------------------------
-      # 1. Checkout repository
-      # --------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --------------------------------------------------
-      # 2. Find project ZIP
-      # --------------------------------------------------
+      # Find the uploaded project ZIP
       - name: Find project ZIP
         shell: bash
         run: |
           set -e
 
-          echo "Files in repository:"
+          echo "Repository files:"
           find . -maxdepth 2 -type f -print
 
-          ZIP=$(find . -maxdepth 1 -type f -name "*.zip" \
-            ! -name "IDT-Tool-Inventory-New-Project.zip" \
-            | head -n 1)
+          ZIP=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
 
           if [ -z "$ZIP" ]; then
             echo "ERROR: No project ZIP found."
@@ -41,12 +34,10 @@ jobs:
 
           ZIP=$(basename "$ZIP")
 
-          echo "ZIP FOUND: $ZIP"
+          echo "Using ZIP: $ZIP"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
 
-      # --------------------------------------------------
-      # 3. Extract project
-      # --------------------------------------------------
+      # Extract project
       - name: Extract project
         shell: bash
         run: |
@@ -55,18 +46,13 @@ jobs:
           rm -rf extracted
           mkdir -p extracted
 
-          echo "Extracting $ZIP..."
-
           unzip -q "$ZIP" -d extracted
 
           echo "Extraction complete."
 
-          echo "Extracted files:"
-          find extracted -maxdepth 4 -type f | head -200
+          find extracted -maxdepth 5 -type f -print | head -300
 
-      # --------------------------------------------------
-      # 4. Find Android project
-      # --------------------------------------------------
+      # Find Android project
       - name: Find Android project
         shell: bash
         run: |
@@ -77,52 +63,52 @@ jobs:
             | head -n 1)
 
           if [ -z "$SETTINGS" ]; then
-            echo "ERROR: Android project not found."
-            echo "Searching extracted directory:"
-            find extracted -maxdepth 6 -type f
+            echo "ERROR: settings.gradle not found."
+            find extracted -maxdepth 7 -type f -print
             exit 1
           fi
 
           PROJECT=$(dirname "$SETTINGS")
 
-          echo "ANDROID PROJECT:"
+          echo "Android project:"
           echo "$PROJECT"
 
           echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
-      # --------------------------------------------------
-      # 5. Show project files
-      # --------------------------------------------------
+      # Show actual project structure
       - name: Show project files
         shell: bash
         run: |
           set -e
 
-          echo "Project directory:"
-          echo "$PROJECT"
-
+          echo "PROJECT = $PROJECT"
           echo ""
-          echo "Project files:"
-          find "$PROJECT" -maxdepth 5 -type f -print
 
-      # --------------------------------------------------
-      # 6. Setup Java
-      # --------------------------------------------------
+          find "$PROJECT" -maxdepth 6 -type f -print
+
+      # Java
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # --------------------------------------------------
-      # 7. Setup Gradle
-      # --------------------------------------------------
-      - name: Set up Gradle
+      # Install Gradle directly
+      - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
-      # --------------------------------------------------
-      # 8. Check Android project
-      # --------------------------------------------------
+      # Verify Gradle
+      - name: Check Gradle
+        shell: bash
+        run: |
+          set -e
+
+          echo "Gradle version:"
+          gradle --version
+
+      # Check Android project
       - name: Check Android project
         shell: bash
         working-directory: ${{ env.PROJECT }}
@@ -136,20 +122,14 @@ jobs:
             exit 1
           fi
 
-          if [ ! -f "gradlew" ]; then
-            echo "ERROR: gradlew not found."
+          if [ ! -f "build.gradle" ] && [ ! -f "build.gradle.kts" ]; then
+            echo "ERROR: Root build.gradle/build.gradle.kts not found."
             exit 1
           fi
 
-          chmod +x gradlew
+          echo "Android project structure OK."
 
-          echo ""
-          echo "Gradle version:"
-          ./gradlew --version
-
-      # --------------------------------------------------
-      # 9. Check Android SDK
-      # --------------------------------------------------
+      # Android SDK
       - name: Check Android SDK
         shell: bash
         run: |
@@ -160,39 +140,31 @@ jobs:
 
           sdkmanager --list_installed | head -100 || true
 
-      # --------------------------------------------------
-      # 10. Install required Android SDK packages
-      # --------------------------------------------------
+      # Install Android SDK
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -e
 
-          yes | sdkmanager --licenses >/dev/null || true
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
 
           sdkmanager \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      # --------------------------------------------------
-      # 11. Build Debug APK
-      # --------------------------------------------------
+      # Build APK
       - name: Build debug APK
         shell: bash
         working-directory: ${{ env.PROJECT }}
         run: |
           set -e
 
-          chmod +x gradlew
+          echo "Starting Android build..."
 
-          echo "Starting Gradle build..."
+          gradle clean assembleDebug --stacktrace
 
-          ./gradlew clean assembleDebug --stacktrace
-
-      # --------------------------------------------------
-      # 12. Find APK
-      # --------------------------------------------------
+      # Find APK
       - name: Find APK
         shell: bash
         working-directory: ${{ env.PROJECT }}
@@ -205,7 +177,10 @@ jobs:
 
           if [ -z "$APK" ]; then
             echo "ERROR: APK was not created."
+
+            echo "Build files:"
             find . -type f | sort
+
             exit 1
           fi
 
@@ -214,10 +189,8 @@ jobs:
 
           echo "APK=$APK" >> "$GITHUB_ENV"
 
-      # --------------------------------------------------
-      # 13. Rename APK
-      # --------------------------------------------------
-      - name: Rename APK
+      # Prepare APK
+      - name: Prepare APK
         shell: bash
         working-directory: ${{ env.PROJECT }}
         run: |
@@ -228,12 +201,9 @@ jobs:
           cp "$APK" \
             "$GITHUB_WORKSPACE/apk-output/IDT-Tool-Inventory.apk"
 
-          echo "Final APK:"
           ls -lh "$GITHUB_WORKSPACE/apk-output/IDT-Tool-Inventory.apk"
 
-      # --------------------------------------------------
-      # 14. Upload APK
-      # --------------------------------------------------
+      # Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
