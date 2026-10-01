@@ -1,0 +1,173 @@
+name: Build IDT Tool Inventory APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find new project ZIP
+        shell: bash
+        run: |
+          set -e
+
+          ZIP="$(find . -maxdepth 2 -type f -iname 'IDT-Tool-Inventory-New-Project.zip' | head -n 1)"
+
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: IDT-Tool-Inventory-New-Project.zip was not found."
+            echo "Files in repository:"
+            find . -maxdepth 3 -type f | sort
+            exit 1
+          fi
+
+          echo "Found ZIP: $ZIP"
+          echo "ZIP_PATH=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Extract project
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf extracted
+          mkdir -p extracted
+
+          unzip -q "$ZIP_PATH" -d extracted
+
+          echo "Extracted files:"
+          find extracted -maxdepth 4 -type f | sort
+
+      - name: Find Android project
+        shell: bash
+        run: |
+          set -e
+
+          SETTINGS="$(find extracted -type f \( \
+            -name 'settings.gradle' \
+            -o -name 'settings.gradle.kts' \
+          \) | head -n 1)"
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: Android settings.gradle/settings.gradle.kts not found."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$SETTINGS")"
+
+          echo "Android project found at:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Show project files
+        shell: bash
+        run: |
+          set -e
+
+          echo "Project:"
+          find "$PROJECT_DIR" -maxdepth 3 -type f | sort
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Check Android SDK
+        shell: bash
+        run: |
+          set -e
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          if [ -z "$ANDROID_HOME" ]; then
+            echo "ERROR: Android SDK was not found."
+            exit 1
+          fi
+
+          echo "Installed Android SDK packages:"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list_installed 2>/dev/null || true
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -e
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -f "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found."
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -e
+
+          cd "$PROJECT_DIR"
+
+          echo "Building project from:"
+          pwd
+
+          gradle \
+            --no-daemon \
+            --stacktrace \
+            assembleDebug
+
+      - name: Find APK
+        shell: bash
+        run: |
+          set -e
+
+          APK="$(find "$PROJECT_DIR" -type f -name '*.apk' | head -n 1)"
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not created."
+            exit 1
+          fi
+
+          echo "APK FOUND:"
+          echo "$APK"
+
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+
+      - name: Rename APK
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p output
+
+          cp "$APK_PATH" \
+            "output/IDT-Tool-Inventory.apk"
+
+          ls -lh output/IDT-Tool-Inventory.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: IDT-Tool-Inventory-APK
+          path: output/IDT-Tool-Inventory.apk
+          if-no-files-found: error
